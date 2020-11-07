@@ -1,79 +1,105 @@
+
+%% Pseudo code
+
+% Connect MATLAB to the raspi. Burn-in for camera settings.
+% (Test: load in segmented videos for background, single fly, mating)
+
+
+% Prompt user to begin.
+
+% *** PRE TEST STUFF ***
+% Prompt user for manual crop of the wells.
+% Get arenas (fly universe). Show user outlines of detected arenas.
+% Acquire images for background. Probably 50 is enough?
+% Calculate background and store.
+
+% *** BEGIN FEMALE LOADING ***
+% Prompt user to start loading flies
+% User says when done loading females
+
+% Each second, acquire a snapshot. Program should detect one fly in each well. 
+% (Test: have a try statement. If no raspi, look for a path to a test
+% video.
+
+% *** BEGIN MALE LOADING ***
+% Prompt user to begin loading males
+% User says when done loading males
+
+% *** BEGIN EXPERIMENT ***
+% Each second, acquire a snapshot.
+% (Test: have a try statement. If no raspi, look for a path to a test
+% video.)
+% Crop into arenas, run blob counter on each arena.
+% Put certain-colored border around each arena and display to user to show
+% if pair is mating or not.
+% (Test: print out times to prove it really works!)
+
+%% To Do
+
+% add camera settings to settings file
+
 %% Master Initiation
-%
-tic
-%tic
+
 disp('==================================')
 disp('Initiation')
+disp('==================================')
 
-% Choose whether to favor speed or RAM.
-% Speedy: loads entire video (with many frames skipped) in flymaster. 
-%   Then for each arena, for each frame, pass to a cropping function.
-% RAM: does not ever load entire video. For each arena, for each frame,
-%   load the frame, crop it, store the image.
-speed_type = 'speedy'; % speedy or RAM
-video_type = 'heatrig'; % lightpad or heatrig
+% Load in settings as a struct
+Settings = table2struct(readtable('fkbc_settings.xlsx'));
 
-% Label batch processing and read the batch processing parameter file 
-if strcmp(video_type, 'lightpad')
-    settings_file = importdata('flytrack_settings.xlsx');
-elseif strcmp(video_type, 'heatrig')
-    settings_file = importdata('flytrack_settings_HEATRIG.xlsx');
+% Define Raspi IP addresses
+disp('Current heatrig IP addresses:')
+ATTA = '10.32.64.135';
+FLICK = '10.32.64.168';
+DOT = '10.32.64.69';
+HEIMLICH = '10.32.64.44';
+IPs = {ATTA, FLICK, DOT, HEIMLICH};
+rigNames = {'Atta', 'Flick', 'Dot', 'Heimlich'};
+
+% Define Raspi UN and PW
+rpiUN = 'pi';
+rpiPW = 'raspberry';
+
+%% Get user input for start up
+
+disp('==================================')
+disp('User menus')
+disp('==================================')
+
+% Ask user what raspi to use
+for iRig = 1:length(rigNames)
+    fprintf('%s: %s \n', rigNames{iRig}, IPs{iRig})
 end
 
-% General path of videos
-% genvidpath = settings_file.textdata{1};
-% genvidpath = genvidpath(strfind(genvidpath, ',')+1:end);
-genvidpath = settings_file.textdata{1,2};
-
-% Export path of analysis
-% export_path = settings_file.textdata{2};
-% export_path = export_path(strfind(export_path, ',')+1:end);
-export_path = settings_file.textdata{2,2};
-
-% Determine whether a computer is a PC or not
-% PC_or_not = settings_file.textdata{3};
-% PC_or_not = PC_or_not(strfind(PC_or_not, ',')+1:end)=='Y';
-PC_or_not = settings_file.textdata{3,2} == 'Y';
-
-% Determine whether the analysis will be run in quiet mode or not
-% quietmode = settings_file.textdata{4};
-% quietmode = quietmode(strfind(quietmode, ',')+1:end)=='Y';
-quietmode = settings_file.textdata{4,2} == 'Y';
-
-% Determine whether the results will be printed or not
-% printresult = settings_file.textdata{5};
-% printresult = printresult(strfind(printresult, ',')+1:end)=='Y';
-printresult = settings_file.textdata{5,2} == 'Y';
-
-% Determine the target FPS
-targetfps = settings_file.data(1);
-% targetfps = str2double(targetfps(strfind(targetfps, ',')+1:end));
-
-% Determine which RGB channel to choose when tracking the videos
-channel2choose = settings_file.data(2);
-% channel2choose = str2double(channel2choose(strfind(channel2choose, ',')+1:end));
-
-% Determine which frame in each video (in the video's fps to load first)
-firstframe2load = settings_file.data(3);
-% firstframe2load = str2double(firstframe2load(strfind(firstframe2load, ',')+1:end));
-
-
-% Determine whether knight mode is on
-if exist('Knightmode','var')==0
-    Knightmode=0;
+goodRig = 0;
+while ~goodRig
+    rig = input('\n Connect to which Raspi? Eg: Atta. Or enter TEST for test mode \n', 's');
+    try
+        if ismember(rig, rigNames) || strcmp(rig, 'TEST')
+            goodRig = 1;
+        end
+    catch
+        disp('Please enter one of the rig names')
+    end
+end
     
-    % Manually open a file
-    [filename,vidpath] = uigetfile(genvidpath,'Select the video file');
-    
-    % Temporarily add path
-    addpath(fullfile(vidpath,filename));
-    
-    % Ask the number of videos to load
-    num_vids=inputdlg('Enter the number of videos','Number of Videos');   
+%% Connect to Raspberry Pi and camera
+
+% Connect to desired Raspi, or load test video
+if strcmp(rig, 'TEST')
+    % load various videos for testing
+else
+    try
+        rpi = raspi(rig);
+    catch
+        error('Could not connec to raspi')
+    end
+    camera = cameraboard(rpi, 'Resolution', '1980x1080');
+    % set settings
+    lastImage = warmupcamera(camera, numWarmUps);
 end
 
 
-%}
 
 %% Manual Cropping Measurement
 %
