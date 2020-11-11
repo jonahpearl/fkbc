@@ -1,17 +1,22 @@
 function [ flyuniverse, flyuniverse_props, n_arenas ] = ...
-    autoflyuniv( Mov, cropindices12, cropindices34, channel2choose, ...
+    autoflyuniv( frame, cropindices12, cropindices34, channel2choose, ...
     flyuniverse_bw_threshold, flyuniverse_disk_size )
 %autoflyuniv automatically determines the well locations in the OFER plate.
 %It locks the max number of wells as 32.
 %   Detailed explanation goes here
 
-flyuniverse = Mov(cropindices12,cropindices34,channel2choose);
+flyuniverse = frame(cropindices12,cropindices34,channel2choose);
 
-flyuniverse_bw = im2bw(flyuniverse,flyuniverse_bw_threshold);
+% flyuniverse_bw = im2bw(flyuniverse,flyuniverse_bw_threshold);
+flyuniverse_bw = imbinarize(flyuniverse);
 
 flyuniverse_bw_opened = imopen(imfill(flyuniverse_bw,'holes'),strel('disk',flyuniverse_disk_size));
 
-[flyuniverse_bw_opened_labeled,n_arenas] = bwlabel(flyuniverse_bw_opened);
+% Use transpose to make it count regions in the order that we're used to.
+% Then reverse the output to match up with the video.
+flyuniverse_bw_opened_TRANSPOSE = flyuniverse_bw_opened';
+[flyuniverse_bw_opened_labeled_TRANSPOSE,n_arenas] = bwlabel(flyuniverse_bw_opened_TRANSPOSE);
+flyuniverse_bw_opened_labeled = flyuniverse_bw_opened_labeled_TRANSPOSE';
 
 flyuniverse_props = regionprops(flyuniverse_bw_opened_labeled,'Extrema','Area');
 
