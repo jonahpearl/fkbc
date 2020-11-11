@@ -36,8 +36,10 @@
 
 %% To Do
 
-% add camera settings to settings file
+% Fix background acquisition
 
+% Test videos:
+% '/Volumes/MasseyTOSHI/Jonah 2020/Heatrig_vids/Heatrig_full_1/201109_udata_45c_10m.MP4'
 %% Master Initiation
 
 disp('==================================')
@@ -48,7 +50,6 @@ disp('==================================')
 Settings = table2struct(readtable('fkbc_settings.xlsx'));
 
 % Define Raspi IP addresses
-disp('Current heatrig IP addresses:')
 ATTA = '10.32.64.135';
 FLICK = '10.32.64.168';
 DOT = '10.32.64.69';
@@ -67,6 +68,7 @@ disp('User menus')
 disp('==================================')
 
 % Ask user what raspi to use
+disp('Current heatrig IP addresses:')
 for iRig = 1:length(rigNames)
     fprintf('%s: %s \n', rigNames{iRig}, IPs{iRig})
 end
@@ -87,7 +89,18 @@ end
 
 % Connect to desired Raspi, or load test video
 if strcmp(rig, 'TEST')
-    % load various videos for testing
+    
+    % Ask user where test video is
+    vidString = input('Please enter path to master video, as a string \n');
+    
+    % Find pre-trimmed sub videos
+    [vidPath, vidName, vidExt] = fileparts(vidString);
+    bkgdVidObj = VideoReader(fullfile(vidPath, strcat(vidName, '_BKGD', vidExt)));
+    singleFliesVidObj = VideoReader(fullfile(vidPath, strcat(vidName, '_BKGD',vidExt)));
+    matingVidObj = VideoReader(fullfile(vidPath, strcat(vidName, '_EXP', vidExt)));
+    
+    % Load image for fly universe and arena cropping
+    lastImage = read(matingVidObj, 30);
 else
     try
         rpi = raspi(rig);
@@ -95,64 +108,156 @@ else
         error('Could not connec to raspi')
     end
     camera = cameraboard(rpi, 'Resolution', '1980x1080');
-    % set settings
+    
+    % Set settings
+    camera.Brightness = Settings.CameraBrightness;
+    camera.Contrast = Settings.CameraContrast;
+    camera.AWB = Settings.CameraAWB;
+    camera.ExposureMode = Settings.CameraExposureMode;
+    
+    % Allow camera to settle (weird bug)
     lastImage = warmupcamera(camera, numWarmUps);
 end
 
+%% Cropping and finding arenas
 
+%{
+Recall that top left of image is 0,0, and oddly that bottom right is MAX,0.
+So rows go up/down, and cols go left/right.
+(I.e., x-values go in what we would normally call the y-direction.)
+(This is not what MATLAB shows as the "xy" value in the tooltip when you
+use imshow, so be wary.)
+cropindex1_manual: ind of top edge (min x of video)
+cropindex2_manual: ind of bottom edge (max x of video)
+cropindex3_manual: ind of left edge (min y of video)
+cropindex4_manual: ind of right edge (max y of video)
 
-%% Manual Cropping Measurement
-%
-%tic
+%}
 
-
-% Load the video object
-VidObj = VideoReader(filename);
-
-% Load the first frame
-Mov=read(VidObj,firstframe2load);
-
-
-if Knightmode==0
-    % Show what's going on
-    disp('==================================')
-    disp('Manual Cropping Measurement')
+userSatisfied = 0;
+while ~userSatisfied
+    h=msgbox(strcat('Please draw a rectangle around all 12 fly arenas.',...
+        'You only get one try, but you can tell the program to keep repeating',...
+        'the procedure until you''re satisfied'));
     
-    % Manual cropping
-    [ cropindex1_manual, cropindex2_manual, cropindex3_manual, cropindex4_manual ]...
-    = flyunivmanual( Mov, channel2choose );
+    % Manually draw the rectangle and return relevant img positions
+    [cropindex1_manual, cropindex2_manual, cropindex3_manual, cropindex4_manual]...
+        = flyunivmanual(lastImage, Settings.Channel2Choose);
+    
+    % Find the arenas
+    [flyuniverse, flyuniverse_props, n_arenas] = autoflyuniv(lastImage,...
+        cropindex1_manual:cropindex2_manual,cropindex3_manual:cropindex4_manual,...
+        Settings.Channel2Choose, 0.5, 10); % Change the 0.7 to other values of threshold; 
+                                            % 0.5 for some f-ed up videos
+    
+    % Show the user the arenas
+    figure
+    imshow(flyuniverse)
+    hold on
+    for arena_num = 1 : n_arenas
+            
+        % These nums are for each arena relative to the fly universe
+        cropindex1 = max(ceil(min(flyuniverse_props( arena_num ).Extrema(: , 1)) - arena_margin), 1); % min of all y-coords (horizontal)
+        cropindex2 = max(floor(max(flyuniverse_props( arena_num ).Extrema(: , 1)) + arena_margin) , 1); % max of all y-coords (horizontal)
+        cropindex3 = max(ceil(min(flyuniverse_props( arena_num ).Extrema(: , 2)) - arena_margin) , 1); % min of all x-coords (vertical axis)
+        cropindex4 = max(floor(max(flyuniverse_props( arena_num ).Extrema(: , 2)) + arena_margin) , 1); % max of all x-coords (vertical axis)
+        
+        % Draw rectangles around each arena
+        rectangle('Position', [cropindex1, cropindex3, (cropindex2 - cropindex1), (cropindex4 - cropindex3)], 'Edgecolor', 'g')
+        text(cropindex1*0.9, cropindex3*0.9, sprintf('Arena %d', arena_num), 'Color', 'g')
+
+        % Debugging
+        % These are for cropping out of the full video
+%         xvals = (cropindex3 + cropindex1_manual) : (cropindex4 + cropindex1_manual - 1);
+%         yvals = (cropindex1 + cropindex3_manual) : (cropindex2 + cropindex3_manual - 1);
+%         arena = lastImage(xvals, yvals);
+%         figure
+%         imshow(arena);
+%         pause
+%         close gcf
+    end
+    
+    % Ask the user if that's good
+    goodInput = 0;
+    while ~goodInput
+        t = input('Is this the correct set of arenas? 0 for no, 1 for yes \n');
+        if t ~= 0 && t ~= 1
+            disp('Please enter 0 or 1')
+        else
+            goodInput = 1;
+            if t == 1
+               userSatisfied = 1;
+            end
+        end
+    end
 end
 
+%% Get backgrounds
 
-%toc
-%}
-
-%% Auto Cropping Measurement
-%
-%tic
 disp('==================================')
-disp('Auto Cropping Measurement')
+disp('Background Acquisition')
 
-[flyuniverse, flyuniverse_props, n_arenas] = autoflyuniv(Mov,...
-    cropindex1_manual:cropindex2_manual,cropindex3_manual:cropindex4_manual,...
-    channel2choose, 0.5, 10); % Change the 0.7 to other values of threshold; 
-% 0.5 for some f-ed up videos
+if strcmp(rig, 'TEST')
+    
+    % Pre-allocate cell to hold backgrounds
+    bkgdCell = cell(1, n_arenas);
+    
+    % Get all video properties
+    nVidFrame = bkgdVidObj.NumFrames;
+    vidHeight = bkgdVidObj.Height;
+    vidWidth = bkgdVidObj.Width;
+    vidfps = bkgdVidObj.FrameRate;
+    vidDuration = bkgdVidObj.Duration;
 
-%toc
-%}
+    % Figure out how many frames to skip in each iteration
+    frames2skip = round(vidfps/Settings.TargetFPS);
 
-%% Autocropping and Processing all Videos
-%
-disp('==================================')
-disp('Autocropping and Processing')
-%tic
+    % Get the frames to load
+    nframe_flyload = length(Settings.FirstFrame2Load : frames2skip : nVidFrame);
+    
+    % Load the video
+    [bkgdMov, FPS] = flyloadspeedyvid(bkgdVidObj, Settings.Channel2Choose,...
+            nframe_flyload, Settings.FirstFrame2Load, frames2skip, nVidFrame, vidDuration);
+        
+    % get background of each arena
+    for arena_num = 1 : n_arenas
+        % These nums are for each arena relative to the fly universe
+        cropindex1 = max(ceil(min(flyuniverse_props( arena_num ).Extrema(: , 1)) - arena_margin), 1); % min of all y-coords (horizontal)
+        cropindex2 = max(floor(max(flyuniverse_props( arena_num ).Extrema(: , 1)) + arena_margin) , 1); % max of all y-coords (horizontal)
+        cropindex3 = max(ceil(min(flyuniverse_props( arena_num ).Extrema(: , 2)) - arena_margin) , 1); % min of all x-coords (vertical axis)
+        cropindex4 = max(floor(max(flyuniverse_props( arena_num ).Extrema(: , 2)) + arena_margin) , 1); % max of all x-coords (vertical axis)
+        
+        % Determine the arena height and width
+        arena_height = cropindex4 - cropindex3;
+        arena_width = cropindex2 - cropindex1;
+        xvals = (cropindex3 + cropindex1_manual) : (cropindex4 + cropindex1_manual - 1);
+        yvals = (cropindex1 + cropindex3_manual) : (cropindex2 + cropindex3_manual - 1);
+        
+        % Pre-allocate Arena matrix
+        Arena = uint8(zeros(arena_height, arena_width, nframe_flyload));
+        
+        % Crop the movie
+        Arena(:,:,:) = bkgdMov(xvals,yvals, :);
+        
+        % Get background
+        backcalcskip_endframe = min(size(Arena,3) - 1 , round( Settings.BkgdCalcEndtime * FPS + 1 )); % last frame used to calculate background
+        nbackcalcskip = round(backcalcskip_endframe / Settings.Frames4Bkgd); % frames to skip to sample background frames
+        backgroundcalcstack=Arena(:,:,1:nbackcalcskip:backcalcskip_endframe); % Form the background calculation stack
+        background=uint8(median(single(backgroundcalcstack),3)); % Use median to calculate the background
+        bkgdCell{arena_num} = background;
+    end
+    
+elseif 1
+
+    
+end
 
 % Set the margin of each arena
 arena_margin=0;
 
-% Prime a ranking vector for the arenas
-arena_rank = zeros( size( flyuniverse ) );
 
+%% Autocropping and Processing all Videos
+%
 % Prime a cell recording the inter-fly distances of all arenas in all
 % videos
 inter_fly_dist_allvid_cell = cell( str2double( num_vids{ 1 } ) , 1 );
